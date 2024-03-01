@@ -1,2 +1,5 @@
 This goal of this project is to compare the effectiveness of Machine Learning tools and especially Deep Learning when compared to classical methods based on statistical analysis for the task of Remaining Useful Life (RUL) estimation of rotating machinery. The main focus of the project is on pitting damage, based on the data produced at the Tribology Grooup, Imperial COllege, using a Micro-Pitting Rig, produced by PCS Instruments. 
-This particular types of model is trying to classify the onset/progression and pitting of the specimen  
+
+This particular types of model is trying to classify the onset/progression and pitting of the specimen. The base model differentiates between pitting and micro-pitting. 
+
+Next iterations of the model will try to improve it and add other models on top to (after classification) to infer different important statistics for each category (like wear for micro-pitting, crack lenght for pitting or any important information). One of those models could be the model for RUL estimation for pitting but others could be designed and trained.             

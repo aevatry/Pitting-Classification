@@ -266,5 +266,3 @@ def _order_dir(dirlist:list):
                 
             
         dirlist[start_i], dirlist[idx_min] = dirlist[idx_min], dirlist[start_i]
-
-    

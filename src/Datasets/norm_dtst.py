@@ -2,14 +2,26 @@ import torch
 import numpy as np
 import os
 from torch.utils.data import Dataset
-
 class LONG_NORM (Dataset):
+
+    """
+    PyTorch Dataset to extract times series features and labels. It goes through the whole range of all series in steps and extract the corresponding features. The series need to be organised as rows of n data points (each row is a feature) and the labels are the last row. The start point for the sequence is decided using random distribution in a specified interval. This Dataset class self batches, so batch need to be set to 1 in a DataLoader. It batches with all available series and sub-batches with different starting points within each serie. 
+
+    Args:
+        train_dir (str): Directory where all files (each file is 1 run) are stored
+        **kwargs (dict): Dictionnary to pass additional optional parameters
+            Optional parameters:
+                min_length (int = 5000): minimum length of extracted features
+                max_start (int = 3600): max starting index to draw the starting points
+                sub_batches (int = 5): number of sub-batches to extract for each time series. Minimum 1
+                sequence_step (int = 5): Factor by which the size of the dataset is reduced per epoch. Minimum 1
+    """
 
     def __init__(self, train_dir:str,  **kwargs):
         super().__init__()
 
-        options = ['min_len', 'max_start_index']
-        default = [3600, 5000]
+        options = ['min_length', 'max_start', 'sub_batches', 'sequence_step']
+        default = [5000, 3600, 5, 5]
         self.get_opts(options, default, kwargs)
 
         # Checking for different types of text based files
@@ -31,42 +43,86 @@ class LONG_NORM (Dataset):
         all_series_len = [series_t[i].shape[1] for i in range(len(series_t))]
         self.all_series_len = all_series_len
 
-        
-    def __len__(self):    
-        return max(self.all_series_len) - self.min_len
+    def __len__(self):
+        # get length -1 because we want to vary the lenght at each sequence lenght by +/- sequence_step (see __getitem__)
+        return int((max(self.all_series_len) - self.min_length) / self.sequence_step) - 1
 
     def __getitem__(self, idx):
-
-       # Draw the random sequence lenght, centered around mid sequence lenght (z=0.5)
-       a = 0.5
-       z = np.random.uniform(size = 1)
-       z = a*z[0]**3 - a*1.5*z[0]**2 + (1+0.5*a)*z[0]
-       sequence_lenght = int(self.min_len + z*(max(self.all_series_len) - self.min_len))
-
-       existence = self._selfbatch(self.all_series_len, sequence_lenght)
+        
+        # We still get random lengths even if we go through the whole dataset in steps
+        sequence_length = int(self.min_length + self.sequence_step*idx) + np.random.randint(low=-self.sequence_step, high=self.sequence_step+1)
 
 
-       fail_class = np.array([[self.series_t[-1][sequence_lenght]] for i in existence])
-       label = self.get_label(fail_class)
+        features = []
+        labels = []
 
-       # List of all series features
-       features = np.array([get_R(self.series_t[i][:-1, 0 : sequence_lenght], ma_win=300)  for i in existence])
+        for idx, timeserie in enumerate(self.series_t):
 
-       features = torch.as_tensor( features.squeeze(2), dtype= torch.float32)
+            start_point_range = self.all_series_len[idx] - sequence_length
+            starting_points = self.get_starting_points(start_point_range)
 
-       return features, label
+            # verify that starting points exist
+            if isinstance(starting_points, np.ndarray):
+        
+                for start_idx in starting_points:
+                    # extract features and labels
+                    fail_class = timeserie[-1][sequence_length + start_idx]
+                    labels += [self.get_label(fail_class)]
+                    features += [get_R(timeserie[:-1, start_idx : sequence_length + start_idx], ma_win=300)]
+        
+        labels = np.array(labels)
+        features = np.array(features)
+        #features = torch.as_tensor(np.array(features).squeeze(2), dtype= torch.float32)
+        return features, labels
 
 
-    def _selfbatch(self, all_series_len, seq_len):
-        # decides which series are included in thos batch
-        existence = [i for i in range(len(all_series_len)) if seq_len<all_series_len[i]]
-        return existence
+    def get_starting_points (self, start_point_range: int):
+
+        """
+        Draws random starting points based on the max available rang we can choose from. 
+
+        Returns:
+            List : if starting points exist, 
+            None : otherwise
+
+        """
+
+        # Logic to choose the starting points
+        if start_point_range > self.max_start:
+            # draw geometric up to max starting range if start point range is too big
+            # the p parameter was chosen based on testing
+            start_points = np.random.geometric(p = 8/self.max_start, size = self.sub_batches)
+            start_points[np.where(start_points>self.max_start)] = self.max_start
+
+        elif self.max_start >= start_point_range > 80:
+            # draw geometric up to start point range if it is small enough
+            # 80 is chosen based on 8 (only draw geometric if p<0.1)
+            start_points = np.random.geometric(p = 8/start_point_range, size = self.sub_batches)
+            start_points[np.where(start_points>start_point_range)] = start_point_range
+
+        elif 80 >= start_point_range >= self.sub_batches:
+            start_points = np.random.choice(start_point_range, size= self.sub_batches ,replace=False)
+
+        else:
+            start_points = None
+
+        return start_points
+    
+    
+    
 
     def get_label(self, fail_class):
 
-        labels = np.zeros((fail_class.shape[0:-1], ))
+        match fail_class:
 
-        return labels
+            case 0:
+                label = torch.tensor([1,0,0])
+            case 1:
+                label = torch.tensor([0,1,0])
+            case 2:
+                label = torch.tensor([0,0,1])
+
+        return label
 
     def get_opts(self,options:list, defaults:list, kwargs: dict)-> None:
 
@@ -84,56 +140,10 @@ class LONG_NORM (Dataset):
             setattr(self, opt, opt_val)
 
 
-
-
-
-
 ######## Helper functions ########
 
-def EMA(sequence: np.ndarray, ma_win: int):
-    """
-    Exponential moving average of time series
 
-    Args:
-        sequence (np.ndarray): array of dimensions (features, lenght)
-        ma_win (int): number of points taken in the moving average window
-
-    Returns:
-        Sk (np.ndarray): array of the corresponding moving average values
-    """
-    EMA_vals = np.empty((sequence.shape[0], sequence.shape[1] - ma_win + 1))
-    alpha = 2/(ma_win+1)
-
-    for i in range(0, sequence.shape[1] - ma_win + 1):
-        if i == 0:
-            EMA_vals[:,0] = (1/ma_win)*np.sum(sequence[:, 0 : 0+ma_win], axis = 1)
-
-        else:
-            EMA_vals [:,i] = (1-alpha)*EMA_vals[:,i-1] + alpha*sequence[:, i+ma_win-1]
-
-    return EMA_vals
-
-def SMA(sequence: np.ndarray, ma_win: int):
-    """
-    Simple moving average of time series
-
-    Args:
-        sequence (np.ndarray): array of dimensions (features, lenght)
-        ma_win (int): number of points taken in the moving average window
-
-    Returns:
-        Sk (np.ndarray): array of the corresponding moving average values
-    """
-    SMA_vals = np.empty((sequence.shape[0], sequence.shape[1] - ma_win + 1))
-
-    for i in range(0, sequence.shape[1] - ma_win + 1):
-
-        SMA_vals[:,i] = (1/ma_win)*np.sum(sequence[:, i : i+ma_win], axis = 1)
-
-    return SMA_vals
-
-
-def get_R(sequence: np.ndarray, ma_win:int, high_norma:int = 1, low_norma:int = 0, MA_mode:str = 'EMA', sl_win:int = None):
+def get_R (sequence: np.ndarray, ma_win:int, high_norma:int = 1, low_norma:int = 0):
 
     """
     Get the Adaptive Normalization of the input sequence
@@ -143,71 +153,42 @@ def get_R(sequence: np.ndarray, ma_win:int, high_norma:int = 1, low_norma:int = 
         ma_win (int): number of points taken in the moving average window
         high_norma (int, default = 1): higher value for normalisation
         low_norma (int, default = 0): lower value for normalisation
-        MA_mode (str, default = 'EMA): Mode of the moving average series. Two implemented: 'EMA' (Exponential moving average) and 'SMA' (Simple Moving Average)
-        sl_win (int, optional): number fo points in each Disjoint Sliding Window. Default is put to lenght of the sequence
 
     Returns:
-        R (np.ndarray): Normalized sequence with dimensions (batch, features, lenght) if sl_win = lenght
-                        IF sl_win != lenght, we have R (batch, feature, lenght - sl_win +1, sl_win)
+        R_scaled (np.ndarray): Normalized sequence with dimensions (features, lenght)
     """
 
-    if MA_mode == 'SMA':
-        MA = SMA(sequence, ma_win)
-    elif MA_mode == 'EMA':
-        MA = EMA(sequence, ma_win)
-    else:
-        raise NotImplementedError(f"The moving average mode needs to be 'EMA' or 'SMA' but got {MA_mode} instead")
+    MA = get_MA(sequence, ma_win).reshape(sequence.shape[0], 1)
+    R_scaled = sequence/MA
 
-    if sl_win == None:
-        sl_win = sequence.shape[-1]
+    R = normalise_R(R_scaled, high_norma, low_norma)
 
-    R = np.zeros((sequence.shape[0], sequence.shape[1] - sl_win + 1, sl_win))
-
-    for i in range(0, R.shape[1]):
-        S = sequence[:,i:i+sl_win]
-        Sk = MA[:,i].reshape((R.shape[0],-1))
-        R_new = S/Sk
-        R[:,i] = R_new
-
-    _outliers_norm(R, high_norma, low_norma)
     return R
 
+def get_MA(sequence, ma_win):
+
+    MA = np.sum(sequence[:, :ma_win], axis=1)/ma_win
+
+    return MA
+
+def normalise_R (R_scaled, high_norma, low_norma):
 
 
-def _outliers_norm (R, high_norma, low_norma):
+    # Finding the normalization parameters
+    quantiles = np.array([np.quantile(arr, [0.25,0.75]) for arr in R_scaled])
 
-    quantiles = np.array([np.quantile(arr, [0.25,0.75], axis = 0) for arr in R.reshape((R.shape[0], -1))])
+    IQR = (quantiles[:, 1] - quantiles[:, 0])
+    
+    low_lim = quantiles[:,0] - 1.5*IQR   
+    high_lim = quantiles[:,1] + 1.5*IQR
+    
+    min_R = np.min( R_scaled, axis=1 )
+    max_R = np.max( R_scaled, axis=1 )
+    min_a = np.max(np.stack((min_R, low_lim)), axis = 0)
+    max_a = np.min(np.stack((max_R, high_lim)), axis = 0)
 
-    IQR = (quantiles[:, 1] - quantiles[:, 0]).reshape((R.shape[0], -1))
+    # Actual normalization
 
-    low_lim = quantiles[:,0].reshape((R.shape[0], -1)) - 1.5*IQR
-    high_lim = quantiles[:,1].reshape((R.shape[0], -1)) + 1.5*IQR
-
-    # set rows/Disjoint Sliding Window to NONE if any value in row outside of quartiles
-    # block below is NOT to be used: because we want really long w sections in the R series, really high probability that one of the vals will be off: voids to whole line. And we still need corrects low_lim and high_lim for minmax normalization
-    '''
-    for i,batch in enumerate(R):
-        for j,feature in enumerate(batch):
-            for m, DSW in enumerate(feature):
-
-                cond_list = [True for val in DSW if val<lims[i][j][0] or val>lims[i][j][1]]
-
-                if True in cond_list:
-                    R[i,j,m].fill(None)
-    '''
-
-    _minmax_norm(R, high_lim, low_lim, high_norma, low_norma)
-
-def _minmax_norm(R, high_lim, low_lim, high_norma, low_norma):
-
-    min_R = np.min( R.reshape((R.shape[0], -1)), axis=1 ).reshape((R.shape[0], -1))
-    max_R = np.max( R.reshape((R.shape[0], -1)), axis=1 ).reshape((R.shape[0], -1))
-
-    min_a = np.max(np.concatenate((min_R, low_lim), axis = 1), axis = 1).reshape(R.shape[0], -1)
-    max_a = np.min(np.concatenate((max_R, high_lim), axis = 1), axis = 1).reshape(R.shape[0], -1)
-
-    for i in range(0,R.shape[-2]):
-        for j in range(0, R.shape[-1]):
-
-            holder = (high_norma - low_norma)* (R[:, i,j].reshape((R.shape[0], -1)) - min_a)/(max_a - min_a) + low_norma
-            R[:, i, j] = holder.reshape((R.shape[0]))
+    a_scale = (max_a - min_a).reshape(R_scaled.shape[0], -1)
+    R = (high_norma-low_norma)*(R_scaled - min_a.reshape(R_scaled.shape[0], -1))/a_scale + low_norma
+    return R
