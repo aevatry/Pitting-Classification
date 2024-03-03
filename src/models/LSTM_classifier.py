@@ -146,8 +146,8 @@ class Spatial_LSTM_block (nn.Module):
             X_conv = self.spatial_conv[i](X_pyr)
 
             # initial hidden and cell states
-            h_t = torch.zeros(X_conv.shape[0], self.hidden_layers)
-            c_t = torch.zeros(X_conv.shape[0], self.hidden_layers)
+            h_t = torch.zeros(X_conv.shape[0], self.hidden_layers).to(X_conv.device)
+            c_t = torch.zeros(X_conv.shape[0], self.hidden_layers).to(X_conv.device)
 
             for index in range(X_conv.shape[-1]):
 
