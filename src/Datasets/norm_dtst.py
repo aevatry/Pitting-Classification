@@ -67,12 +67,11 @@ class LONG_NORM (Dataset):
                 for start_idx in starting_points:
                     # extract features and labels
                     fail_class = timeserie[-1][sequence_length + start_idx]
-                    labels += [self.get_label(fail_class)]
+                    labels += [fail_class]
                     features += [get_R(timeserie[:-1, start_idx : sequence_length + start_idx], ma_win=300)]
         
-        labels = np.array(labels)
-        features = np.array(features)
-        #features = torch.as_tensor(np.array(features).squeeze(2), dtype= torch.float32)
+        labels = np.array(labels, dtype=int)
+        features = torch.as_tensor(np.array(features), dtype= torch.float32)
         return features, labels
 
 

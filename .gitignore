@@ -5,6 +5,11 @@ __pycache__/
 
 # Ignore data and parameter folders and others
 **/data
+**/experiment
+
+# Ignore my own markdown files
+learning.md
+TODO.md
 
 # Ignore .DSstore files
 *.DS_Store

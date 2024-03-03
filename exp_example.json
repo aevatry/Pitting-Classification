@@ -1,0 +1,14 @@
+{
+"_name_config": "expn", 
+"epoch_best_model": 5, 
+"last_epoch": 20, 
+"best_eval_loss": 0.005852032918483019, 
+"model_kwargs": {"model_module": "src.models.CNN1D_LSTM2layers", "model_class": "CNN1D_LSTM2layers", "_pyramid_bins": [500, 100, 25], "_pooling_mode": "avg", "_num_feats": 5}, 
+"loss_func_kwargs": {"loss_func_module": "src.loss_functions.MIX_RMSE_SCORE", "loss_func_class": "RUL_loss_mixed", "_theta": 0.7}, 
+"loss_type": "standard",
+"loss_func": "NLLLoss",
+"loss_func_std_args":{"weight": null, "reduction": "mean"},
+"dtst_train_kwargs": {"dtst_module": "src.Datasets.norm_dataset", "dtst_class_name": "LONG_NORM", "permutations": 2000, "min_len": 5000, "label_start": 0}, 
+"dtst_eval_kwargs": {"dtst_module": "src.Datasets.norm_dataset", "dtst_class_name": "LONG_NORM", "permutations": 200, "min_len": 5000, "label_start": 0}, 
+"optimizer_args": {"optim_mode": "Adam", "_learning_rate": 0.002}
+}
