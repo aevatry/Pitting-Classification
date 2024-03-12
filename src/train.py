@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader
 import os
 from torch.utils.tensorboard import SummaryWriter
 import importlib
+import time
+import psutil
 
 
 
@@ -11,6 +13,8 @@ import importlib
 def train_net(config, device, epochs_wanted):
     writer_path = ''.join(['experiment', '/',config.model_kwargs["model_class"],'/','runs/', config._name_config])
     writer = SummaryWriter(writer_path)
+
+    device = torch.device(device)
 
     # load the parameters of the model and put it on the gpu if available
     model = load_pmodel(config, device)
@@ -20,7 +24,7 @@ def train_net(config, device, epochs_wanted):
     train_dtst, eval_dtst = get_datasets(config)
 
     training_loader = DataLoader(train_dtst, batch_size=1, shuffle=True)
-    eval_loader = DataLoader(eval_dtst, batch_size=1, shuffle=True)
+    eval_loader = DataLoader(eval_dtst, batch_size=1, shuffle=False)
 
     # Training components needed
     loss_func = get_loss_function(config)
@@ -29,7 +33,7 @@ def train_net(config, device, epochs_wanted):
 
     last_epoch = config.last_epoch
     for epoch in range(last_epoch, last_epoch + epochs_wanted):
-        print (f"EPOCH: {epoch+1} starting \n ...\n")
+        print (f"\n ...\nEPOCH: {epoch+1} starting \n ...\n")
 
         # Train for the epoch
         model.train(True)
@@ -40,6 +44,8 @@ def train_net(config, device, epochs_wanted):
         running_eval_loss = 0.0
         # Disable gradient computation and reduce memory consumption with torch.no_grad()
         with torch.no_grad():
+            print(f"Evaluation starting for epoch : {epoch}")
+            start = time.time()
             for eval_data in eval_loader:
                 # Get data from evaluation dataset
                 vinputs, vlabels = eval_data
@@ -52,6 +58,9 @@ def train_net(config, device, epochs_wanted):
                 running_eval_loss += eval_loss
         avg_eval_loss = running_eval_loss / len(eval_loader)
         print(f"TRAIN loss: {avg_train_loss} | EVAL loss: {avg_eval_loss} for EPOCH: {epoch+1}\n")
+
+        end = time.time()
+        print(f"Evaluation time for epoch {epoch} is : {end-start}")
         # Log the running loss averaged per batch
         # for both training and validation
         writer.add_scalars('Training vs. Validation Loss',
@@ -72,10 +81,9 @@ def train_net(config, device, epochs_wanted):
 
         # Save configuration file
         config.save()
-
-    #save last model
-    new_model_path = ''.join(['experiment', '/',config.model_kwargs["model_class"],'/','saved_models', '/',config._name_config, '/','lastmodel.pt'])
-    torch.save(model.state_dict(), new_model_path)
+        #save last model
+        new_model_path = ''.join(['experiment', '/',config.model_kwargs["model_class"],'/','saved_models', '/',config._name_config, '/','lastmodel.pt'])
+        torch.save(model.state_dict(), new_model_path)
     return model
 
 
@@ -183,8 +191,14 @@ def train_1_epoch(model, training_loader, loss_func, optimizer):
     tot_loss = 0.
     dev = next(model.parameters()).device
 
-    for data in training_loader:
+    total_memory_ised = 0
 
+    start = time.time()
+
+    print(f"There is {len(training_loader)} batches for this epoch")
+    for idx, data in enumerate(training_loader):
+
+        
         # Every data instance is an input + label pair
         inputs, labels = data
         inputs = inputs[0].to(dev)
@@ -206,6 +220,23 @@ def train_1_epoch(model, training_loader, loss_func, optimizer):
 
         # Gather data and report
         tot_loss += loss.item()
+
+        # get memory usage
+        if 'mps' in str(dev):
+            total_memory_ised += torch.mps.current_allocated_memory()/1e6
+
+        elif 'cuda' in str(dev):
+            total_memory_ised += torch.cuda.memory_allocated()/1e6
+        else:
+            total_memory_ised += psutil.Process(os.getpid()).memory_info()[0]/(2.**30)
+
+
+
+    end = time.time()
+    print(f"Training for {idx} batches takes: {end-start}")
+    average_memory = total_memory_ised/idx
+    print(f"Average memory usage of :{average_memory}")
+    
 
     return tot_loss / len(training_loader)
 

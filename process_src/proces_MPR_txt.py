@@ -15,11 +15,11 @@ def get_test_run_dirnames (roller_dir: str):
     """
     dirnames = []
     
-    for file in os.listdir(roller_dir):
+    for filename in os.listdir(roller_dir):
         
-        if file.endswith('_RadiusLoss.txt'):
-            
-            dirnames += [file.removesuffix('_RadiusLoss.txt')]
+        if "RadiusLoss" in filename:
+            # get the first 4 characters
+            dirnames += [filename[0:5]]
             
     return dirnames
 

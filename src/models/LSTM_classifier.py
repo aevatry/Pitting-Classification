@@ -69,16 +69,12 @@ class LSTM_classifier(nn.Module):
         X = torch.unsqueeze(X, 1)
         # Fully Connected Layers
         X = self.classify_conv(X)
+        
+        X = torch.squeeze(X, dim=(1,2))
 
-        X = torch.squeeze(X)
         X = self.logmax(X)
         return X
     
-    def get_total_bins(self):
-        
-        list_to_array = np.array(self._pyramid_bins)
-        assert len(np.array(list_to_array).shape) == 1, 'Bins should be 1 dimensional'
-        return np.sum(list_to_array, axis = 0)
     
 
 
@@ -136,8 +132,10 @@ class Spatial_LSTM_block (nn.Module):
         # X is the result of the previous convolution
         assert X.dim() == 3, 'Expect a 3D input: (Batch, Channels, Lenght)'
 
+        # create empty tensor with size (batch, bin_number, 3)
+        # the dimension 3 is from my requirement of 3 classes
+        out = []
 
-        out =[]
         for i, bin_size in enumerate(self.pyramid_bins):
 
             
@@ -154,10 +152,14 @@ class Spatial_LSTM_block (nn.Module):
                 conv_elmt = X_conv[:,:, index]
                 h_t, c_t = self.LSTMcell[i](conv_elmt, (h_t, c_t)) 
             
-            Xout = self.LSTMlin[i](h_t)
-            out+=[Xout]
             
-        return torch.stack(out, dim=1)
+            Xout = self.LSTMlin[i](h_t)
+            out.append(Xout)
+            
+        out_tensor = torch.stack(out, dim = 1)
+        del out
+
+        return out_tensor
     
 
     def get_adaptive_pool (self, previous_conv:torch.Tensor, output_size:int)-> torch.Tensor:

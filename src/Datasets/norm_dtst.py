@@ -15,13 +15,14 @@ class LONG_NORM (Dataset):
                 max_start (int = 3600): max starting index to draw the starting points
                 sub_batches (int = 5): number of sub-batches to extract for each time series. Minimum 1
                 sequence_step (int = 5): Factor by which the size of the dataset is reduced per epoch. Minimum 1
+                dmg_start (float = 0.0): Float between 0 and 1 for the initial proportion of sequence that is considered non-damage
     """
 
     def __init__(self, train_dir:str,  **kwargs):
         super().__init__()
 
-        options = ['min_length', 'max_start', 'sub_batches', 'sequence_step']
-        default = [5000, 3600, 5, 5]
+        options = ['min_length', 'max_start', 'sub_batches', 'sequence_step', 'dmg_start']
+        default = [5000, 3600, 5, 5, 0.]
         self.get_opts(options, default, kwargs)
 
         # Checking for different types of text based files
@@ -66,9 +67,16 @@ class LONG_NORM (Dataset):
         
                 for start_idx in starting_points:
                     # extract features and labels
-                    fail_class = timeserie[-1][sequence_length + start_idx]
+                    # add -1 to the sequence lenght to adapt to error: index n out-of-bounds for axis with size n
+                    # worst case: random-sequence-length = len(sequence). So for that, we use sequence_length - 1
+                    fail_class = timeserie[-1][sequence_length-1 + start_idx]
+
+                    # For Pitting ONLY: only have damage label if drawn sequence stops before a custom set point
+                    if fail_class==2 and sequence_length+start_idx < self.dmg_start*self.all_series_len[idx]:
+                        fail_class=0
+
                     labels += [fail_class]
-                    features += [get_R(timeserie[:-1, start_idx : sequence_length + start_idx], ma_win=300)]
+                    features += [get_R(timeserie[:-1, start_idx : sequence_length-1 + start_idx], ma_win=300)]
         
         labels = np.array(labels, dtype=int)
         features = torch.as_tensor(np.array(features), dtype= torch.float32)
@@ -99,29 +107,15 @@ class LONG_NORM (Dataset):
             start_points = np.random.geometric(p = 8/start_point_range, size = self.sub_batches)
             start_points[np.where(start_points>start_point_range)] = start_point_range
 
-        elif 80 >= start_point_range >= self.sub_batches:
-            start_points = np.random.choice(start_point_range, size= self.sub_batches ,replace=False)
+        elif 80 >= start_point_range >= 0:
+            start_points = np.random.choice(start_point_range+1, size= min(self.sub_batches, start_point_range+1),replace=False)
+
 
         else:
             start_points = None
 
         return start_points
     
-    
-    
-
-    def get_label(self, fail_class):
-
-        match fail_class:
-
-            case 0:
-                label = torch.tensor([1,0,0])
-            case 1:
-                label = torch.tensor([0,1,0])
-            case 2:
-                label = torch.tensor([0,0,1])
-
-        return label
 
     def get_opts(self,options:list, defaults:list, kwargs: dict)-> None:
 
